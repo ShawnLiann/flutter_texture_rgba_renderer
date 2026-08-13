@@ -44,18 +44,8 @@ G_DEFINE_TYPE(TextureRgba, texture_rgba,
 static void texture_rgba_terminate(TextureRgba* self) {
   g_mutex_lock(&self->mutex);
   g_atomic_int_set(&self->terminated, TRUE);
-  // prior_buffer is no longer referenced by the raster thread. buffer may be
-  // mid-upload if it was already handed out (buffer_ready == FALSE); that one
-  // is released in finalize, after the deferred unref grace period.
-  if (self->prior_buffer) {
-    delete[] self->prior_buffer;
-    self->prior_buffer = nullptr;
-  }
-  if (self->buffer && g_atomic_int_get(&self->buffer_ready)) {
-    delete[] self->buffer;
-    self->buffer = nullptr;
-    g_atomic_int_set(&self->buffer_ready, FALSE);
-  }
+  // Free nothing here: the raster thread reads the handed-out buffer AFTER
+  // copy_pixels returns (mutex released); finalize frees after the grace.
   g_mutex_unlock(&self->mutex);
 }
 
@@ -93,6 +83,9 @@ static gboolean texture_rgba_copy_pixels(FlPixelBufferTexture* texture,
     *width = g_atomic_int_get(&self->video_width);
     *height = g_atomic_int_get(&self->video_height);
     self->prior_buffer = (uint8_t *)buffer;
+    // Ownership moved to prior_buffer; leaving both set would alias and
+    // double-free in finalize.
+    g_atomic_pointer_set(&self->buffer, nullptr);
     g_atomic_int_set(&self->buffer_ready, FALSE);
     self->consumed++;
     g_mutex_unlock(&self->mutex);

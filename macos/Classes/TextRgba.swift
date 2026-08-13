@@ -52,7 +52,11 @@ import CoreVideo
         let textRgba = TextRgba()
         textRgba.registry = registry
         textRgba.textureId = registry?.register(textRgba) ?? -1
-        TextureRgbaRegistry.add(textRgba)
+        // A failed registration is reported as -1 and never closed; keeping
+        // it out of the registry avoids retaining it forever.
+        if textRgba.textureId != -1 {
+            TextureRgbaRegistry.add(textRgba)
+        }
         return textRgba
     }
 

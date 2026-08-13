@@ -28,8 +28,13 @@ public class TextureRgbaRendererPlugin: NSObject, FlutterPlugin {
             result(-1)
         } else {
             let textRgba = TextRgba.new(registry: texture_registry)
-            renderer[key] = textRgba
-            result(textRgba.textureId)
+            if (textRgba.textureId == -1) {
+                // Dart treats -1 as failure and never closes it; do not store.
+                result(-1)
+            } else {
+                renderer[key] = textRgba
+                result(textRgba.textureId)
+            }
         }
     case "closeTexture":
         let args = call.arguments as! Dictionary<String, Any?>

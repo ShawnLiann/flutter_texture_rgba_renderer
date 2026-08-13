@@ -11,15 +11,17 @@
 
 #include <cstring>
 #include <mutex>
+#include <shared_mutex>
 #include <unordered_map>
 #include <unordered_set>
 
 std::unordered_map<int64_t, TextureRgba *> g_renderer_map;
 
 // Rust's video thread pushes frames through a raw TextureRgba pointer with no
-// lifetime contract; membership is checked under this mutex on every push so
-// closeTexture can safely release the object.
-static std::mutex g_live_mutex;
+// lifetime contract; membership is checked under a shared lock on every push
+// so closeTexture (unique lock) can safely release the object.
+// shared_timed_mutex: this target builds as C++14.
+static std::shared_timed_mutex g_live_mutex;
 static std::unordered_set<void *> g_live_textures;
 
 void FlutterRgbaRendererPluginOnRgba(void *texture_rgba_ptr, const uint8_t *buffer, int len, int width, int height);
@@ -55,7 +57,7 @@ static void texture_rgba_renderer_plugin_handle_method_call(
       texture_rgba->texture_id = texture_id;
       g_renderer_map.insert(std::make_pair(key, texture_rgba));
       {
-        const std::lock_guard<std::mutex> lock(g_live_mutex);
+        const std::unique_lock<std::shared_timed_mutex> lock(g_live_mutex);
         g_live_textures.insert(texture_rgba);
       }
       // Register to the registrar.
@@ -72,14 +74,14 @@ static void texture_rgba_renderer_plugin_handle_method_call(
       TextureRgba *texture_rgba = g_renderer_map[key];
       {
         // Drain Rust-side pushes before tearing the texture down.
-        const std::lock_guard<std::mutex> lock(g_live_mutex);
+        const std::unique_lock<std::shared_timed_mutex> lock(g_live_mutex);
         g_live_textures.erase(texture_rgba);
       }
       texture_rgba_terminate(texture_rgba);
       fl_texture_registrar_unregister_texture(self->texture_registrar, FL_TEXTURE(texture_rgba));
       // The raster thread may still borrow the FlTexture for the frame in
       // flight (the registrar hands out unowned pointers); the object used to
-      // be leaked to dodge that — release it after a grace period instead.
+      // be leaked to dodge that — release after a heuristic grace instead.
       g_timeout_add_seconds(1, [](gpointer data) -> gboolean {
         g_object_unref(data);
         return G_SOURCE_REMOVE;
@@ -181,8 +183,9 @@ extern "C" {
         return;
       }
       // The pointer may already have been closed by the Dart side; holding
-      // g_live_mutex across the push keeps close from freeing it mid-call.
-      const std::lock_guard<std::mutex> live_lock(g_live_mutex);
+      // the shared lock across the push keeps close from freeing it mid-call
+      // without serializing pushes of different displays against each other.
+      const std::shared_lock<std::shared_timed_mutex> live_lock(g_live_mutex);
       if (g_live_textures.find(texture_rgba_ptr) == g_live_textures.end()) {
         return;
       }
@@ -207,7 +210,7 @@ extern "C" {
    }
 
    uint64_t FlutterRgbaRendererPluginGetConsumed(void *texture_rgba_ptr) {
-      const std::lock_guard<std::mutex> live_lock(g_live_mutex);
+      const std::shared_lock<std::shared_timed_mutex> live_lock(g_live_mutex);
       if (g_live_textures.find(texture_rgba_ptr) == g_live_textures.end()) {
         return 0;
       }

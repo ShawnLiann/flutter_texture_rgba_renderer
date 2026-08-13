@@ -15,21 +15,26 @@ extern "C" {
 /// Keep the same name with Windows.
 /// The pointer may already have been closed by the Dart side; resolve it
 /// through the live-object registry (which retains) instead of dereferencing.
+/// The calling Rust thread has no autorelease pool, so provide one.
 void FlutterRgbaRendererPluginOnRgba(void* texture_rgba_ptr, const uint8_t* buffer, int len, int width, int height, int stride_align) {
-    TextRgba* texture_rgba = [TextureRgbaRegistry get:(NSUInteger)texture_rgba_ptr];
-    if (texture_rgba == nil) {
-        return;
+    @autoreleasepool {
+        TextRgba* texture_rgba = [TextureRgbaRegistry get:(NSUInteger)texture_rgba_ptr];
+        if (texture_rgba == nil) {
+            return;
+        }
+        [texture_rgba markFrameAvaliableRawWithBuffer:buffer len:len width:width height:height stride_align: stride_align];
     }
-    [texture_rgba markFrameAvaliableRawWithBuffer:buffer len:len width:width height:height stride_align: stride_align];
 }
 
 /// Keep the same name with Windows.
 uint64_t FlutterRgbaRendererPluginGetConsumed(void* texture_rgba_ptr) {
-    TextRgba* texture_rgba = [TextureRgbaRegistry get:(NSUInteger)texture_rgba_ptr];
-    if (texture_rgba == nil) {
-        return 0;
+    @autoreleasepool {
+        TextRgba* texture_rgba = [TextureRgbaRegistry get:(NSUInteger)texture_rgba_ptr];
+        if (texture_rgba == nil) {
+            return 0;
+        }
+        return [texture_rgba getConsumed];
     }
-    return [texture_rgba getConsumed];
 }
 
 #if __cplusplus
