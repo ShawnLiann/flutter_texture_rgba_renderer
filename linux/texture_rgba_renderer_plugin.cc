@@ -80,9 +80,12 @@ static void texture_rgba_renderer_plugin_handle_method_call(
       texture_rgba_terminate(texture_rgba);
       fl_texture_registrar_unregister_texture(self->texture_registrar, FL_TEXTURE(texture_rgba));
       // The raster thread may still borrow the FlTexture for the frame in
-      // flight (the registrar hands out unowned pointers); the object used to
-      // be leaked to dodge that — release after a heuristic grace instead.
-      g_timeout_add_seconds(1, [](gpointer data) -> gboolean {
+      // flight (the registrar hands out unowned pointers) and the embedder
+      // offers no completion barrier, so this stays a heuristic: the object
+      // used to be leaked forever to dodge that; release it after a grace
+      // long enough that only a terminally hung raster thread (a dead session
+      // anyway) could still be inside populate.
+      g_timeout_add_seconds(10, [](gpointer data) -> gboolean {
         g_object_unref(data);
         return G_SOURCE_REMOVE;
       }, texture_rgba);
