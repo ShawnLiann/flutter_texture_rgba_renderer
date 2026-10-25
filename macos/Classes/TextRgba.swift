@@ -125,6 +125,29 @@ import CoreVideo
         }
     }
 
+    /// Take a decoded GPU frame over. `pixelBuffer` is borrowed and only valid
+    /// for this call: storing it in the strong `data` property is what keeps it
+    /// alive afterwards (ARC owns that +1; no explicit CVPixelBufferRetain).
+    ///
+    /// Returns false when the frame is refused, and then changes no state.
+    @objc public func markFrameAvailable(pixelBuffer: CVPixelBuffer, width: Int, height: Int, pixfmt: UInt32) -> Bool {
+        // Take the ticket inside the critical section, notify outside it: the
+        // Flutter registry callback must not run while the queue is held, or a
+        // re-entrant call from the engine would deadlock.
+        let ticket: Int64? = queue.sync {
+            guard textureId != -1, registry != nil else { return nil }
+            guard pixfmt == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange ||
+                  pixfmt == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange else { return nil }
+            self.data = pixelBuffer
+            self.width = width
+            self.height = height
+            return textureId
+        }
+        guard let id = ticket else { return false }
+        registry?.textureFrameAvailable(id)
+        return true
+    }
+
     @objc public func markFrameAvaliableRaw(buffer: UnsafePointer<UInt8>, len: Int, width: Int, height: Int, stride_align: Int) -> Bool {
         queue.sync {
             _markFrameAvaliable(buffer: buffer, len: len, width: width, height: height, stride_align: stride_align)
