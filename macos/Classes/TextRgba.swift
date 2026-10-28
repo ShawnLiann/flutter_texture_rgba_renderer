@@ -129,15 +129,34 @@ import CoreVideo
     /// for this call: storing it in the strong `data` property is what keeps it
     /// alive afterwards (ARC owns that +1; no explicit CVPixelBufferRetain).
     ///
-    /// Returns false when the frame is refused, and then changes no state.
+    /// Returns false when the frame is refused, and then changes no state, so the
+    /// caller can still fall back to the RGBA path.
     @objc public func markFrameAvailable(pixelBuffer: CVPixelBuffer, width: Int, height: Int, pixfmt: UInt32) -> Bool {
         // Take the ticket inside the critical section, notify outside it: the
         // Flutter registry callback must not run while the queue is held, or a
         // re-entrant call from the engine would deadlock.
         let ticket: Int64? = queue.sync {
             guard textureId != -1, registry != nil else { return nil }
-            guard pixfmt == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange ||
-                  pixfmt == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange else { return nil }
+            guard width > 0, height > 0 else { return nil }
+
+            // The buffer, not the caller, is the authority on the format: the
+            // engine reads it straight from the buffer, so accepting a buffer
+            // whose own format disagrees with `pixfmt` would present the frame as
+            // something it is not. A mismatch means the two sides disagree about
+            // what was decoded, which is a reason to refuse rather than to guess.
+            let bufferFormat = CVPixelBufferGetPixelFormatType(pixelBuffer)
+            guard bufferFormat == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange ||
+                  bufferFormat == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange else { return nil }
+            guard bufferFormat == pixfmt else { return nil }
+
+            // The engine builds its textures with
+            // CVMetalTextureCacheCreateTextureFromImage, which needs an
+            // IOSurface-backed buffer. NV12 alone does not imply one: a buffer
+            // without an IOSurface would be accepted here and then refused by the
+            // engine, after this method had already said yes and the caller had
+            // already skipped the RGBA fallback.
+            guard CVPixelBufferGetIOSurface(pixelBuffer) != nil else { return nil }
+
             self.data = pixelBuffer
             self.width = width
             self.height = height
