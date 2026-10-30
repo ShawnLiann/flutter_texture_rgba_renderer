@@ -44,16 +44,26 @@ uint64_t FlutterRgbaRendererPluginGetConsumed(void* texture_rgba_ptr) {
 /// takes its own reference when it keeps the frame. Returns 1 when the frame
 /// was taken over and will be presented, 0 when it was refused - the caller
 /// must then deliver the same decoded frame through the RGBA path.
+///
+/// The pointer is resolved through `TextureRgbaRegistry` rather than bridged
+/// directly: the Dart side may already have closed the texture, and this call
+/// races with that by nature (the decoder hands out frames while the window can
+/// be closing). The calling Rust thread has no autorelease pool, so provide one.
 int32_t FlutterRgbaRendererPluginOnPixelBuffer(void* texture_rgba_ptr, void* pixel_buffer, int32_t width, int32_t height, uint32_t pixfmt) {
     if (texture_rgba_ptr == NULL || pixel_buffer == NULL) {
         return 0;
     }
-    TextRgba* texture_rgba = (__bridge TextRgba *)(texture_rgba_ptr);
-    BOOL accepted = [texture_rgba markFrameAvailableWithPixelBuffer:(CVPixelBufferRef)pixel_buffer
-                                                              width:width
-                                                             height:height
-                                                             pixfmt:pixfmt];
-    return accepted ? 1 : 0;
+    @autoreleasepool {
+        TextRgba* texture_rgba = [TextureRgbaRegistry get:(NSUInteger)texture_rgba_ptr];
+        if (texture_rgba == nil) {
+            return 0;
+        }
+        BOOL accepted = [texture_rgba markFrameAvailableWithPixelBuffer:(CVPixelBufferRef)pixel_buffer
+                                                                  width:width
+                                                                 height:height
+                                                                 pixfmt:pixfmt];
+        return accepted ? 1 : 0;
+    }
 }
 
 #if __cplusplus
