@@ -6,6 +6,7 @@
 //
 
 #import <Foundation/Foundation.h>
+#import <CoreVideo/CoreVideo.h>
 #import "texture_rgba_renderer/texture_rgba_renderer-Swift.h"
 
 #if __cplusplus
@@ -34,6 +35,24 @@ uint64_t FlutterRgbaRendererPluginGetConsumed(void* texture_rgba_ptr) {
             return 0;
         }
         return [texture_rgba getConsumed];
+    }
+}
+
+/// Takes `pixel_buffer` over without a copy: 1 = presented, 0 = refused and the
+/// caller must use the RGBA path. Borrowed for this call only.
+/// Registry-resolved, with an autorelease pool: the caller is a Rust thread.
+int32_t FlutterRgbaRendererPluginOnPixelBuffer(void* texture_rgba_ptr, void* pixel_buffer, int32_t width, int32_t height, uint32_t pixfmt) {
+    if (texture_rgba_ptr == NULL || pixel_buffer == NULL) {
+        return 0;
+    }
+    @autoreleasepool {
+        TextRgba* texture_rgba = [TextureRgbaRegistry get:(NSUInteger)texture_rgba_ptr];
+        if (texture_rgba == nil) {
+            return 0;
+        }
+        BOOL accepted = [texture_rgba markFrameAvailableWithPixelBuffer:(CVPixelBufferRef)pixel_buffer
+                                                                  width:width height:height pixfmt:pixfmt];
+        return accepted ? 1 : 0;
     }
 }
 

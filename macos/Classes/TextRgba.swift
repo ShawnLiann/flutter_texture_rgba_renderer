@@ -125,6 +125,31 @@ import CoreVideo
         }
     }
 
+    /// Takes a decoded frame over without copying it. `pixelBuffer` is borrowed
+    /// for this call only; storing it in `data` is what keeps it alive.
+    /// Refusal changes no state, so the caller can still use the RGBA path.
+    @objc public func markFrameAvailable(pixelBuffer: CVPixelBuffer, width: Int, height: Int, pixfmt: UInt32) -> Bool {
+        // Notify outside the queue: the registry callback must not re-enter it.
+        let ticket: Int64? = queue.sync {
+            guard textureId != -1, registry != nil, width > 0, height > 0 else { return nil }
+            // The buffer's own format is the authority, not the caller's `pixfmt`.
+            let bufferFormat = CVPixelBufferGetPixelFormatType(pixelBuffer)
+            guard bufferFormat == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange ||
+                  bufferFormat == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange else { return nil }
+            guard bufferFormat == pixfmt else { return nil }
+            // The engine needs an IOSurface-backed buffer: without one we would say
+            // yes here, the texture would never show, and the fallback is gone.
+            guard CVPixelBufferGetIOSurface(pixelBuffer) != nil else { return nil }
+            self.data = pixelBuffer
+            self.width = width
+            self.height = height
+            return textureId
+        }
+        guard let id = ticket else { return false }
+        registry?.textureFrameAvailable(id)
+        return true
+    }
+
     @objc public func markFrameAvaliableRaw(buffer: UnsafePointer<UInt8>, len: Int, width: Int, height: Int, stride_align: Int) -> Bool {
         queue.sync {
             _markFrameAvaliable(buffer: buffer, len: len, width: width, height: height, stride_align: stride_align)
