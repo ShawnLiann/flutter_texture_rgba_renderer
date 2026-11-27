@@ -140,9 +140,9 @@ import CoreVideo
             // The engine needs an IOSurface-backed buffer: without one we would say
             // yes here, the texture would never show, and the fallback is gone.
             guard CVPixelBufferGetIOSurface(pixelBuffer) != nil else { return nil }
+            // width/height describe the RGBA pool that ensurePool compares
+            // against; this path bypasses the pool, so it must not set them.
             self.data = pixelBuffer
-            self.width = width
-            self.height = height
             return textureId
         }
         guard let id = ticket else { return false }
